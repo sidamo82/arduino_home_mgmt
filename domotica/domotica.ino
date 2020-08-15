@@ -1,6 +1,13 @@
 #include <SPI.h>
 #include <Ethernet.h>
 
+int tDelay = 100;
+int latchPin = 11;      // (11) ST_CP [RCK] on 74HC595
+int clockPin = 9;      // (9) SH_CP [SCK] on 74HC595
+int dataPin = 12;     // (12) DS [S1] on 74HC595
+
+byte leds = 0;
+
 // network configuration. dns server, gateway and subnet are optional.
 
 // the media access control (ethernet hardware) address for the shield:
@@ -26,6 +33,13 @@ EthernetServer server(80);
 // Key to secure communication between client and server
 String securekey="ciao";
 
+void updateShiftRegister()
+{
+   digitalWrite(latchPin, LOW);
+   shiftOut(dataPin, clockPin, LSBFIRST, leds);
+   digitalWrite(latchPin, HIGH);
+}
+
 void configureEthernet(byte *mac, IPAddress ip, IPAddress dnServer, IPAddress gateway, IPAddress subnet){
   
    // initialize the ethernet device
@@ -42,7 +56,11 @@ void setup() {
   configureEthernet(mac, ip, dnServer, gateway, subnet);
 
     // initialize digital pin LED_BUILTIN as an output.
-  pinMode(8, OUTPUT);
+  //pinMode(8, OUTPUT);
+
+    pinMode(latchPin, OUTPUT);
+  pinMode(dataPin, OUTPUT);  
+  pinMode(clockPin, OUTPUT);
  
 }
 
@@ -93,7 +111,27 @@ void loop() {
              
             client.println("KEY MATCH");
 
+           
             
+            
+            for(int y=0; y < 100; y++) {
+              
+              leds = 0;
+              updateShiftRegister();
+              delay(tDelay);
+              
+              for (int i = 0; i < 8; i++)
+              {
+                bitSet(leds, i);
+                updateShiftRegister();
+                delay(tDelay);
+                
+              }
+
+              client.println("GO");
+            }
+
+            /*
             if(command=="1"){
           
               digitalWrite(8, HIGH);   // turn the LED on (HIGH is the voltage level)
@@ -107,6 +145,8 @@ void loop() {
               client.println("\nLED SPENTO");
               delay(2000); 
             }
+            */
+            
           } else {
              client.println("KEY NOT MATCH");
           }
