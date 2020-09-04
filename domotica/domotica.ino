@@ -5,12 +5,6 @@
 // Include librerie per sensore temperatura
 #include <dht_nonblocking.h>
 
-// Definisco il tipo di sensore di temperatura
-#define DHT_SENSOR_TYPE DHT_TYPE_11
-
-// Definisco il PIN dove è presente il sensore di temperatura
-static const int DHT_SENSOR_PIN = 6;
-
 // Definisco i 3 PIN utilizzati dal convertitore Seriale->Parallelo
 static const int S74HC595_LATCH_PIN = 3;
 static const int S74HC595_CLOCK_PIN = 2;
@@ -38,13 +32,13 @@ byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 IPAddress dnServer(172, 16, 0, 2);
 
 // the router's gateway address:
-IPAddress gateway(172, 16, 0, 1);
+IPAddress gateway(192, 168, 0, 1);
 
 // the subnet:
 IPAddress subnet(255, 255, 255, 0);
 
 //the IP address is dependent on your network
-IPAddress ip(172, 16, 0, 4);
+IPAddress ip(192, 168, 0, 4);
 
 // Initialize the Ethernet server library
 // with the IP address and port you want to use 
@@ -53,19 +47,62 @@ EthernetServer server(TCP_PORT);
 /* Variabile che contiene lo stato delle uscite del convertitore seriale->parallelo 74HC595 */
 byte leds = 0;
 
+/* Definizione dei sensori di temperatura */
 /* Inizializzo la libreria per la gestione del sensore di temperatura */
-DHT_nonblocking dht_sensor( DHT_SENSOR_PIN, DHT_SENSOR_TYPE );
 
-/* Funzione per la rilevazione della temperatura e dell'umidità */
+// Definisco il tipo di sensore di temperatura
+#define DHT_SENSOR_TYPE_01 DHT_TYPE_11
+
+// Definisco il PIN dove è presente il sensore di temperatura
+static const int DHT_SENSOR_PIN_01 = 6;
+
+DHT_nonblocking dht_sensor_1( DHT_SENSOR_PIN_01, DHT_SENSOR_TYPE_01 );
+  
+/*
+ * Poll for a measurement, keeping the state machine alive.  Returns
+ * true if a measurement is available.
+ */
 static bool measure_environment( float *temperature, float *humidity )
 {
-  if( dht_sensor.measure( temperature, humidity ) == true )
+  static unsigned long measurement_timestamp = millis( );
+
+  /* Measure once every four seconds. */
+  if( millis( ) - measurement_timestamp > 3000ul )
   {
+    if( dht_sensor_1.measure( temperature, humidity ) == true )
+    {
+      measurement_timestamp = millis( );
       return( true );
+    }
   }
-  
+
   return( false );
 }
+
+/* Restituisce la temperatura e umidità rilevate */
+String getTemperature(int iID){
+
+  float temperature;
+  float humidity;
+  String sOutput;
+  
+  /* Measure temperature and humidity.  If the functions returns
+     true, then a measurement is available. */
+  if( measure_environment( &temperature, &humidity ) == true )
+  {
+    Serial.print( "T = " );
+    Serial.print( temperature, 1 );
+    Serial.print( " deg. C, H = " );
+    Serial.print( humidity, 1 );
+    Serial.println( "%" );
+    
+    sOutput = String (temperature);
+  } 
+
+    return sOutput;
+ 
+}
+
 
 /* Funzione che aggiorna i segnali di uscita dal convertitore seriale->parallelo */
 void aggiornaStatoUsciteConvertitoreSerialeParallelo(byte leds_pattern)
@@ -89,14 +126,15 @@ void configureEthernet(byte *mac, IPAddress ip, IPAddress dnServer, IPAddress ga
 }
 
 /* Funzione che accende la luce */
-void sendLightONCommand(int lightID){
-
+void sendLightONCommand(int iLightID){
+  
   /* Buffer di 50 caratteri per stampare stringa di debug su monitor seriale */
   char buffer[50];
-  
-  bitSet(leds, lightID);
+
+   
+  bitSet(leds, iLightID-1);
             
-  sprintf(buffer, "LIGHT ON: %d", lightID);
+  sprintf(buffer, "LIGHT ON: %d", iLightID);
   Serial.println(buffer);
   
   sprintf(buffer, "LEDS: %d", leds);
@@ -108,14 +146,14 @@ void sendLightONCommand(int lightID){
 }
 
 /* Funzione che spegne la luce */
-void sendLightOFFCommand(int lightID){
+void sendLightOFFCommand(int iLightID){
 
   /* Buffer di 50 caratteri per stampare stringa di debug su monitor seriale */
   char buffer[50];
-  
-  bitClear(leds, lightID);
+    
+  bitClear(leds, iLightID-1);
             
-  sprintf(buffer, "LIGHT OFF: %d", lightID);
+  sprintf(buffer, "LIGHT OFF: %d", iLightID);
   Serial.println(buffer);
   
   sprintf(buffer, "LEDS: %d", leds);
@@ -126,31 +164,43 @@ void sendLightOFFCommand(int lightID){
 }
 
 /* Funzione che apre in cancellino */
-void sendOpenGateCommand(int led){
+void sendOpenGateCommand(int iEndpointID){
 
   /* Buffer di 50 caratteri per stampare stringa di debug su monitor seriale */
   char buffer[50];
+
+  /* Numero del PIN della scheda arduino che comanda il cancellino */
+  int iArduinoOutputPin = 0;
+
+  /* Identifico il PIN sulla scheda arduino dove è agganciato il relè che comanda il cancellino */
+  switch(iEndpointID){
+
+    case 1: 
+      iArduinoOutputPin = GATE_OUTPUT_PIN;
+      break;
+  }
   
-  digitalWrite(led, HIGH);
+
+  digitalWrite(iArduinoOutputPin, HIGH);
   sprintf(buffer, "GATE OPEN");
   Serial.println(buffer);
   delay(500);
-  digitalWrite(led, LOW);
+  digitalWrite(iArduinoOutputPin, LOW);
   delay(500);          
 
-  digitalWrite(led, HIGH);
+  digitalWrite(iArduinoOutputPin, HIGH);
   delay(300);
-  digitalWrite(led, LOW);
+  digitalWrite(iArduinoOutputPin, LOW);
   delay(300);          
 
-  digitalWrite(led, HIGH);
+  digitalWrite(iArduinoOutputPin, HIGH);
   delay(300);
-  digitalWrite(led, LOW);
+  digitalWrite(iArduinoOutputPin, LOW);
      
 }
 
 void sendLightCommand(int iLightID, String sAction){
-
+  
   if(sAction.equals("0")==true){
     sendLightOFFCommand(iLightID);
     
@@ -162,138 +212,169 @@ void sendLightCommand(int iLightID, String sAction){
   
 }
 
-/* Restituisce la temperatura e umidità rilevate */
-void getTemperature(){
+String parseCommand(String command, int iNumItem){
+    
+    int iIndexOfStart=0;
+    int iIndexOfEnd=0;
+    
+    String sOutput;
+    
+    for(int iCont=0; iCont<iNumItem; iCont++){
+           
+      if(iCont==0){
+        iIndexOfStart=iIndexOfEnd;      
+      }
+      else if(iIndexOfEnd != -1){
+        iIndexOfStart = iIndexOfEnd + 1;
+      }
+      
+      iIndexOfEnd = command.indexOf('-', iIndexOfStart);
+   
+    }
+     
+    if(iIndexOfEnd != -1){
+      sOutput = command.substring(iIndexOfStart, iIndexOfEnd);
+    } else{
+      sOutput = command.substring(iIndexOfStart);
+    }
+   
+    return sOutput;
 
-  float temperature;
-  float humidity;
-  
-  /* Misuro la temperatura e l'umidità */
-  if( measure_environment( &temperature, &humidity ) == true )
-  {
-    Serial.print( "T = " );
-    Serial.print( temperature, 1 );
-    Serial.print( " deg. C, H = " );
-    Serial.print( humidity, 1 );
-    Serial.println( "%" );
-  } 
 }
 
-/* Funzione che riceve in ingresso il comando ricevuto da Alexa e scatena l'evento sulla scheda arduino */
-void runHomeCommand(String command) {
+String getDeviceType(String command){
+  
+  Serial.println("getDeviceType()");
+  return parseCommand(command, 1);
+}
+
+String getEndpointID(String command){
+
+  Serial.println("getEndpointID()");
+  return parseCommand(command, 2);
+}
+
+String getCommandType(String command){
+
+  Serial.println("getCommandType()");
+  return parseCommand(command, 3);
+
+}
+
+/* Funzione che riceve in ingresso il comando ricevuto da Alexa e scatena l'evento sulla scheda Arduino */
+String runHomeCommand(String command) {
 
      /* Buffer di 50 caratteri per stampare stringa di debug su monitor seriale */
      char buffer[50];
-     char eventID[4];
-     char commandType[2];
-     int charIndex=0;
+     
+     String deviceType="";
+     String endpointID="";
+     String commandType="";
 
-     charIndex=command.indexOf('-');
+     /* Stringa per inviare l'output con l'esito del comando  */
+     String sOutput="";
+     
+     deviceType = getDeviceType(command);
+     endpointID = getEndpointID(command);
+     commandType = getCommandType(command);
     
-     sprintf(eventID, "%c%c%c", command[0],command[1], command[2]);
-     sprintf(commandType, "%c", command[4]);
-
      if(DEBUG == true){
-       Serial.println("--------");
-       sprintf(buffer, "Parse command: eventid: %s - commandtype: %s", eventID, commandType);
-       Serial.println(buffer);
+       
+       Serial.println("BEGIN runHomeCommand()");
+       Serial.println("COMMAND: " + command);
+       Serial.println("DEVICE TYPE: " + deviceType);
+       Serial.println("DEVICE ENDPOINTID: " + endpointID);
+       Serial.println("COMMAND TYPE: " + commandType);
        Serial.println("DOCOMMAND");
+       
      }
      
+     /* Gestore dei sensori di temperatura */
+     if(deviceType.equals("temperaturesensor")){
+      
+       if(DEBUG == true){
+          Serial.println("SENSORE TEMPERATURE COMMAND TRIGGERED");
+          
+        }   
 
-     // Conversione da array di char[] a oggetto String
-     String eventIDStr(eventID);  
+        int iTemperatureSensorID = 0;
+        /* Converto l'ID endpoint in ingresso da formato stringa a numero intero */
+        iTemperatureSensorID = endpointID.toInt();
+        
+        sOutput = getTemperature(iTemperatureSensorID);
+        return sOutput;
+     } 
+     
+     /* Gestore delle luci */
+     else if(deviceType.equals("light")){
+      
+      if(DEBUG == true){
+        Serial.println("LIGHT COMMAND TRIGGERED");
+      }
+      
+      int iLightID = 0;
 
-     if(eventIDStr.equals("001"))
-     {
-      
+      /* Converto l'ID endpoint in ingresso da formato stringa a numero intero */
+      iLightID = endpointID.toInt();
+            
       if(DEBUG == true){
-        Serial.println("LUCE 01");
+        sprintf(buffer, "ID Luce: %d", iLightID);
+        Serial.println(buffer);
       }
       
-      sendLightCommand(0, commandType);
-      
-     } 
-     else if(eventIDStr.equals("002"))
-     {
-      
-      if(DEBUG == true){
-        Serial.println("LUCE 02");
+      if(commandType.equals("1")){
+
+        if(DEBUG == true){
+          sprintf(buffer, "ACCENDI LUCE", iLightID);
+            Serial.println(buffer);
+        }
+        
+        sendLightONCommand(iLightID);
       }
-      
-      sendLightCommand(1, commandType);
-      
-     } 
-     else if(eventIDStr.equals("003"))
-     {
-      
-     if(DEBUG == true){
-        Serial.println("LUCE 03");
+      else if(commandType.equals("0")){
+
+        if(DEBUG == true){
+          sprintf(buffer, "SPEGNI LUCE", iLightID);
+          Serial.println(buffer);
+        }
+        
+        sendLightOFFCommand(iLightID);
       }
+
+      return sOutput;
       
-      sendLightCommand(2, commandType);     
      }
-      else if(eventIDStr.equals("004"))
-     {
-      
+     
+     /* Gestore del cancellino */
+     else if(deviceType.equals("gate")){
+
       if(DEBUG == true){
-        Serial.println("LUCE 04");
+        Serial.println("GATE COMMAND TRIGGERED");
       }
       
-      sendLightCommand(3, commandType);    
+      int iGateID = 0;
+
+      /* Converto l'ID endpoint in ingresso da formato stringa a numero intero */
+      iGateID = endpointID.toInt();
+
+      if(DEBUG == true){
+        sprintf(buffer, "ID Cancellino: %d", iGateID);
+        Serial.println(buffer);
+      }
+      
+      if(commandType.equals("1")){
+
+        if(DEBUG == true){
+          sprintf(buffer, "APRI CANCELLINO", iGateID);
+          Serial.println(buffer);
+        }
+
+        /* Invio il comando di apertura del cancellino */
+        sendOpenGateCommand(iGateID);
+      }
+
      }
-      else if(eventIDStr.equals("005"))
-     {
-      
-      if(DEBUG == true){
-        Serial.println("LUCE 05");
-      }
-      
-      sendLightCommand(4, commandType);    
-     }
-      else if(eventIDStr.equals("006"))
-     {
-      
-      if(DEBUG == true){
-        Serial.println("LUCE 06");
-      }
-      
-      sendLightCommand(5, commandType);    
-     }
-      else if(eventIDStr.equals("007"))
-     {
-      
-      if(DEBUG == true){
-        Serial.println("LUCE 07");
-      }
-      
-      sendLightCommand(6, commandType);    
-     }
-      else if(eventIDStr.equals("008"))
-     {
-      
-      if(DEBUG == true){
-        Serial.println("LUCE 08");
-      }
-      
-      sendLightCommand(7, commandType);    
-     }
-     else if(eventIDStr.equals("009"))
-     {
-      
-      if(DEBUG == true){
-        Serial.println("Cancellino");
-      }
-      
-      sendOpenGateCommand(GATE_OUTPUT_PIN);
-      
-     } 
-     else{
-      if(DEBUG == true){
-        Serial.println("ERRORE COMANDO");
-      }
-     }
- }
+}
 
 /* Funzione che spegne tutte le luci contemporaneamente */
 void spegniTutteLuci(){
@@ -324,48 +405,57 @@ void setup() {
   
 }
 
+/* Inizio programma */
 void loop() {
 
-  int signal = 0;
+  //int signal = 0;
   int line = 1;
-  
+
+
+  /* Chiave di sicurezza impostata nel programma */
   String local_key = SECURE_KEY;
+  /* Chiave di sicurezza inviata da Alexa ad ogni chiamata - deve coincidere con quella impostata nel programma */
   String remote_key = "";
-  
+
+  /* Stringa temporanea dove salvare i messaggi in arriva dalla scheda di rete */
   String message = "";
   String command = "";
-  bool doCommand = false;
+
+  String sOutput = "";
+
   
+  //bool doCommand = false;
+
+  /* Stringa di 50 caratteri usata come memoria temporanea per le varie funzioni del programma */
   char buffer[50];
 
-  // listen for incoming clients
+  /* Attivo la scheda di rete in ascolto per i dati in ingresso */
   EthernetClient client = server.available();
   
-  /* New TCP connection triggered */
+  /* Se la scheda di rete è pronta, procedo con il programma */
   if (client) {
 
     if(DEBUG == true){
       Serial.println("new client");
     }
   
-    // an http request ends with a blank line
+    /* La richiesta in ingresso viene presa in carico dal programma quando termina con una riga di testo vuota */
     boolean currentLineIsBlank = true;
-    
+
+    /* Istruzioni eseguite quando Alexa invia la chiamata alla scheda ethernet di Arduino */
     while (client.connected()) {
   
-      //Serial.println("CONNECTION ESTABLISHED");
-      
       if (client.available()) {
       
+        /* Leggo il carattere in ingresso sulla scheda di rete */
         char c = client.read();
-  
+
+        /* Se non è un carattere di "fine riga" concateno il carattere alla stringa "message" */
         if (c != '\n' && c != '\r') {   
           message = message + c;
         }
                 
-        // if you've gotten to the end of the line (received a newline
-        // character) and the line is blank, the http request has ended,
-        // so you can send a reply
+        /* Se ricevo il carattere di fine riga e currentLineIsBlank=true, significa che Alexa ha finito di inviarmi il comando, procedo dunque ad eseguirlo */
         if (c == '\n' && currentLineIsBlank) {
 
           if(DEBUG == true){
@@ -373,29 +463,42 @@ void loop() {
             Serial.println("LOCAL_KEY: " + local_key);
             Serial.println("COMMAND: " + command);
           }
-          // Check securekey
+          
+          /* Controllo di sicurezza - controllo che la password inviata sia uguale a quella impostata nel programma */
           if(remote_key.equals(local_key)){
 
             if(DEBUG == true){ 
               Serial.println("KEY MATCH");
             }
-            
+
+            /* Invio il comando di "OK" ad Alexa - Significa che ho ricevuto correttamente il comando da eseguire */
             client.println("OK");
-
-            // close the connection:
-            client.stop();
+                  
             
+            /* Invio il comando alla scheda Arduino per l'esecuzione */
+            sOutput = runHomeCommand(command);
+
             if(DEBUG == true){ 
-              Serial.println("client disconnected");
+              Serial.println("CLIENT OUTPUT: " + sOutput);
             }
-            /* Send Command to Arduino Output */
-            runHomeCommand(command);
+            
+            client.println(sOutput);
 
-          } else {
-            
-            
+            if(DEBUG == true){ 
+              Serial.println("CLIENT DISCONNECTED");
+            }
+        
+            /* Chiudo la connessione con Alexa */
+            client.stop();
+
+          } 
+          /* Controllo di sicurezza fallito - non faccio nulla e chiudo la connessione con Alexa */
+          else {
+
+             /* Invio il comando di "KO" ad Alexa - Significa che c'è stato un problema */     
              client.println("KO");
-             // close the connection:
+             
+             /* Chiudo la connessione con Alexa */
              client.stop();
 
              if(DEBUG == true){ 
@@ -410,34 +513,44 @@ void loop() {
           
           break;
         }
-        
+
+        /* Se da Alexa ricevo il carattere di fine riga, salvo la stringa inviata nelle variabili locali */
         if (c == '\n') {
           
           // you're starting a new line
           currentLineIsBlank = true;
 
+          /* In base al numero di linea di comando ricevuta, salvo la stringa nella variabile corretta */
           switch(line){
+          
+           /* LINEA 1: Ricevo la password impostata su Alexa per la comunicazione con "Arduino" - la salvo nella variabile "remote_key" */
            case 1:
                     remote_key=message;
                     break;
-            case 2:
+                    
+           /* LINEA 2: Ricevo il comando da eseguire - la password impostata su Alexa per la comunicazione con "Arduino" - lo salvo nella variabile "command" */
+           case 2:
                     command=message;
                     break;
           }
-          
+
+          /* Svuoto la variabile "message" - in modo che sia pronta a ricevere la prossima riga da Alexa */
           message="";
-          
+
+          /* Incremento il numero di righe */
           line++;
-        } 
+        }
+        /* Se il carattere non è un fine riga proseguo con la prossima */ 
         else if (c != '\r') {
           // you've gotten a character on the current line
           currentLineIsBlank = false;
         }
-       }
-    }
-    
-   }
-
-   //getTemperature();
+      }
    
+    }
+
+   }
+   
+  //getTemperature(1);
+    
 }
