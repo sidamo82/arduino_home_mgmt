@@ -5,6 +5,14 @@
 // Include librerie per sensore temperatura
 #include <dht_nonblocking.h>
 
+
+ // Se è true attivo modulo per registrazione indirizzo IP tramite DynDNS
+static const bool DynDNSENabled = true;
+
+// Credenziali per accesso a sistema dyndns "changeip.com"
+#define DynDNSPASSWORD "dXNlcm5hbWU6cGFzc3dvcmQ=="
+#define DynDNSHOSTNAME "hostname.changeip.com"
+
 // Definisco i 3 PIN utilizzati dal convertitore Seriale->Parallelo
 static const int S74HC595_LATCH_PIN = 3;
 static const int S74HC595_CLOCK_PIN = 2;
@@ -14,7 +22,7 @@ static const int S74HC595_DATA_PIN = 4;
 static const int GATE_OUTPUT_PIN = 5; 
 
 // Se variabile è impostata a true stampo le stringe di DEBUG sul monitor seriale
-static const bool DEBUG = true;
+static const bool DEBUG = false;
 
 // Password per comunicare con Alexa
 #define SECURE_KEY "secure_key" 
@@ -29,7 +37,7 @@ static const bool DEBUG = true;
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };  
 
 // the dns server ip
-IPAddress dnServer(172, 16, 0, 2);
+IPAddress dnServer(192, 168, 0, 1);
 
 // the router's gateway address:
 IPAddress gateway(192, 168, 0, 1);
@@ -44,6 +52,9 @@ IPAddress ip(192, 168, 0, 4);
 // with the IP address and port you want to use 
 EthernetServer server(TCP_PORT);
 
+/* Variabile booleana per segnare il primo ciclo di esecuzione */
+bool bFirstCycle = true;
+
 /* Variabile che contiene lo stato delle uscite del convertitore seriale->parallelo 74HC595 */
 byte leds = 0;
 
@@ -55,6 +66,11 @@ byte leds = 0;
 
 // Definisco il PIN dove è presente il sensore di temperatura
 static const int DHT_SENSOR_PIN_01 = 6;
+
+
+// Variabile che segna il tempo trascorso dall'accensione della scheda 
+unsigned long lastMillis;
+
 
 DHT_nonblocking dht_sensor_1( DHT_SENSOR_PIN_01, DHT_SENSOR_TYPE_01 );
   
@@ -133,7 +149,7 @@ void sendLightONCommand(int iLightID){
 
    
   bitSet(leds, iLightID-1);
-            
+
   sprintf(buffer, "LIGHT ON: %d", iLightID);
   Serial.println(buffer);
   
@@ -152,6 +168,7 @@ void sendLightOFFCommand(int iLightID){
   char buffer[50];
     
   bitClear(leds, iLightID-1);
+ 
             
   sprintf(buffer, "LIGHT OFF: %d", iLightID);
   Serial.println(buffer);
@@ -271,6 +288,7 @@ String runHomeCommand(String command) {
      String endpointID="";
      String commandType="";
 
+
      /* Stringa per inviare l'output con l'esito del comando  */
      String sOutput="";
      
@@ -388,10 +406,44 @@ void accendiTutteLuci(){
   aggiornaStatoUsciteConvertitoreSerialeParallelo(leds);
 }
 
+/* Funzione per aggiornamento indirizzo IP di casa */
+void updateDynDNS(EthernetClient client){
+    /* Stringa di 50 caratteri usata come memoria temporanea per le varie funzioni del programma */
+  char buffer[50];
+  
+  char server[] = "nic.ChangeIP.com";  
+  
+   // if you get a connection, report back via serial:
+  if (client.connect(server, 80)) {
+    Serial.print("connected to ");
+    Serial.println(client.remoteIP());
+    // Make a HTTP request:
+
+    
+    sprintf(buffer, "GET /nic/update?hostname=%s HTTP/1.1", DynDNSHOSTNAME);
+    
+    client.println(buffer);
+    client.println("Host: nic.ChangeIP.com");
+
+
+    sprintf(buffer, "Authorization: Basic %s", DynDNSPASSWORD);
+    client.println(buffer);
+    client.println("Connection: close");
+    client.println();
+  } else {
+    // if you didn't get a connection to the server:
+    Serial.println("connection failed");
+  }
+
+ 
+}
+
+// Configurazione scheda - la funzione che parte all'accensione
 void setup() {
 
   Serial.begin(9600);
 
+  // Configurazione scheda di rete
   configureEthernet(mac, ip, dnServer, gateway, subnet);
   
   /* Inizialize SerialToParallel Chip */
@@ -405,12 +457,12 @@ void setup() {
   
 }
 
+
 /* Inizio programma */
 void loop() {
 
   //int signal = 0;
   int line = 1;
-
 
   /* Chiave di sicurezza impostata nel programma */
   String local_key = SECURE_KEY;
@@ -548,9 +600,25 @@ void loop() {
       }
    
     }
-
    }
-   
-  //getTemperature(1);
-    
+
+   // Se è attivo il modulo DynDns aggiorno l'IP pubblico ogni 10 minuti
+   if(DynDNSENabled){
+     
+     // Aggiorno IP su DynDns ogni 10 minuti
+     if (millis() - lastMillis >= 10*60*1000UL || bFirstCycle == true)
+     {
+
+      if(DEBUG==true){
+        Serial.println("Update DynDNS");
+      }
+
+      bFirstCycle=false;
+      
+      updateDynDNS(client);
+      lastMillis = millis();  //get ready for the next iteration
+     
+     }
+    }
+       
 }
